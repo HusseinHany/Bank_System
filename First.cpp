@@ -453,14 +453,14 @@ int main() {
                 break;
         }
             case 6:{
-				int id;
-				double amount;
-				cout << "Enter Employee ID to edit: ";
-				cin >> id;
-				cout << "Enter amount to edit: ";
-				cin >> amount;
-				fileManager.edit(id, amount);
-				break;
+		int id;
+		double amount;
+		cout << "Enter Employee ID to edit: ";
+		cin >> id;
+		cout << "Enter amount to edit: ";
+		cin >> amount;
+		fileManager.edit(id, amount);
+			break;
 			}
                 case 7: {
                 Admin a;
