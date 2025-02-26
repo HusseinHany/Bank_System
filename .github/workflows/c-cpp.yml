@@ -12,12 +12,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: configure
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Git configuration
+      run: |
+        git config --global safe.directory /home/runner/work/Bank_System/Bank_System
+
+    - name: Configure
       run: ./configure
-    - name: make
+    
+    - name: Build
       run: make
-    - name: make check
+    
+    - name: Run checks
       run: make check
-    - name: make distcheck
+    
+    - name: Run distcheck
       run: make distcheck
