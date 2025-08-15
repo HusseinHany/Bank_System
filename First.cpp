@@ -11,9 +11,40 @@
 #include <functional>
 #include <regex>
 #include <memory>
+#include <mutex>
+#include <sstream>
+
+#ifdef _WIN32
 #include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
 
 using namespace std;
+
+// Cross-platform _getch function (retained as requested but not actively used)
+#ifndef _WIN32
+int _getch() {
+    struct termios oldt, newt;
+    int ch;
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    ch = getchar();
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    return ch;
+}
+#endif
+
+// Global configuration variables (replacing hardcoded constants)
+double MIN_CLIENT_BALANCE = 1500.0;
+double MIN_EMPLOYEE_SALARY = 5000.0;
+const int MAX_LOGIN_ATTEMPTS = 10;
+
+// Mutex for thread-safe file operations
+mutex fileMutex;
 
 // Forward declarations
 class Person;
@@ -31,38 +62,87 @@ int getValidIntInput(const string& prompt);
 double getValidDoubleInput(const string& prompt, double min);
 string getValidName(const string& prompt);
 string getValidPassword(const string& prompt);
-string getSecurePassword(const string& prompt) {
-    cout << prompt;
-    string password;
-    char ch;
-    while ((ch = _getch()) != '\r') { // '\r' is the Enter key
-        if (ch == '\b') { // Handle backspace
-            if (!password.empty()) {
-                cout << "\b \b";
-                password.pop_back();
-            }
-        } else {
-            password.push_back(ch);
-            cout << '*';
-        }
+string getSafeLineInput(const string& prompt);
+string hashPassword(const string& password);
+string getCurrentTimestamp();
+void loadConfig();
+void saveConfig();
+
+// Utility function for current timestamp
+string getCurrentTimestamp() {
+    time_t now = time(nullptr);
+    string timestamp = ctime(&now);
+    // Remove trailing newline
+    if (!timestamp.empty() && timestamp.back() == '\n') {
+        timestamp.pop_back();
     }
-    cout << endl;
-    return password;
+    return timestamp;
 }
 
-// Constants
-const double MIN_CLIENT_BALANCE = 1500.0;
-const double MIN_EMPLOYEE_SALARY = 5000.0;
-const int MAX_LOGIN_ATTEMPTS = 10;
+// Password hashing function using std::hash with hex encoding
+string hashPassword(const string& password) {
+    hash<string> hasher;
+    size_t hashValue = hasher(password);
+    stringstream ss;
+    ss << hex << hashValue;
+    return ss.str();
+}
+
+// Safe line input utility to handle buffer issues
+string getSafeLineInput(const string& prompt) {
+    string input;
+    cout << prompt;
+    cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Clear any leftover input
+    getline(cin, input);
+    return input;
+}
+
+// Load configuration from config.txt
+void loadConfig() {
+    ifstream configFile("config.txt");
+    if (configFile.is_open()) {
+        string line;
+        while (getline(configFile, line)) {
+            size_t pos = line.find('=');
+            if (pos != string::npos) {
+                string key = line.substr(0, pos);
+                string value = line.substr(pos + 1);
+                
+                if (key == "MIN_CLIENT_BALANCE") {
+                    MIN_CLIENT_BALANCE = stod(value);
+                } else if (key == "MIN_EMPLOYEE_SALARY") {
+                    MIN_EMPLOYEE_SALARY = stod(value);
+                }
+            }
+        }
+        configFile.close();
+    } else {
+        // Create default config file if it doesn't exist
+        saveConfig();
+    }
+}
+
+// Save configuration to config.txt
+void saveConfig() {
+    lock_guard<mutex> lock(fileMutex);
+    ofstream configFile("config.txt");
+    if (configFile.is_open()) {
+        configFile << "MIN_CLIENT_BALANCE=" << MIN_CLIENT_BALANCE << endl;
+        configFile << "MIN_EMPLOYEE_SALARY=" << MIN_EMPLOYEE_SALARY << endl;
+        configFile.close();
+    }
+}
 
 class Logger {
 private:
     static void logToFile(const string& message) {
         ofstream logFile("bank_activity.log", ios::app);
         time_t now = time(nullptr);
-        char timestamp[26];
-        ctime_s(timestamp, sizeof(timestamp), &now);
-        timestamp[24] = '\0'; 
+        string timestamp = ctime(&now);
+        // Remove trailing newline
+        if (!timestamp.empty() && timestamp.back() == '\n') {
+            timestamp.pop_back();
+        }
         
         if (logFile.is_open()) {
             logFile << "[" << timestamp << "] " << message << endl;
@@ -177,19 +257,44 @@ public:
     }
     
     void recordTransaction(const string& details) {
-        time_t now = time(nullptr);
-        char timestamp[26];
-        ctime_s(timestamp, sizeof(timestamp), &now);
-        timestamp[24] = '\0';
-        
-        string transaction = "[" + string(timestamp) + "] " + details;
+        string timestamp = getCurrentTimestamp();
+        string transaction = "[" + timestamp + "] " + details;
         transactions.push_back(transaction);
+        
+        // Persist transaction to file
+        lock_guard<mutex> lock(fileMutex);
+        ofstream transFile("transactions.txt", ios::app);
+        if (transFile.is_open()) {
+            transFile << id << "|" << timestamp << "|" << details << endl;
+            transFile.close();
+        }
        
         Logger::logActivity(details, id, "Client");
     }
     
     vector<string> getTransactionHistory() const {
         return transactions;
+    }
+    
+    void loadTransactionHistory() {
+        transactions.clear();
+        ifstream transFile("transactions.txt");
+        if (transFile.is_open()) {
+            string line;
+            while (getline(transFile, line)) {
+                size_t pos1 = line.find('|');
+                size_t pos2 = line.find('|', pos1 + 1);
+                if (pos1 != string::npos && pos2 != string::npos) {
+                    int clientId = stoi(line.substr(0, pos1));
+                    if (clientId == id) {
+                        string timestamp = line.substr(pos1 + 1, pos2 - pos1 - 1);
+                        string details = line.substr(pos2 + 1);
+                        transactions.push_back("[" + timestamp + "] " + details);
+                    }
+                }
+            }
+            transFile.close();
+        }
     }
     
     void display() const override {
@@ -238,6 +343,7 @@ public:
 class FileHelper {
 public:
     static void saveToFile(const string& filename, const string& data) {
+        lock_guard<mutex> lock(fileMutex);
         ofstream file(filename, ios::app);
         if (file.is_open()) {
             file << data << endl;
@@ -249,18 +355,24 @@ public:
     }
     
     static void clearFile(const string& filename) {
+        lock_guard<mutex> lock(fileMutex);
         ofstream file(filename, ios::trunc);
         file.close();
     }
     
     static void saveClient(const Client& client) {
-        string data = to_string(client.getId()) + "," +  client.getName() + "," +  client.getPassword() + "," + to_string(client.getBalance()) + "," +client.getEmail();
+        string data = to_string(client.getId()) + "," +  client.getName() + "," +  hashPassword(client.getPassword()) + "," + to_string(client.getBalance()) + "," +client.getEmail();
         saveToFile("clients.txt", data);
     }
     
     static void saveEmployee(const Employee& employee) {
-        string data = to_string(employee.getId()) + "," + employee.getName() + "," +  employee.getPassword() + "," + to_string(employee.getSalary()) + "," +employee.getEmail();
+        string data = to_string(employee.getId()) + "," + employee.getName() + "," +  hashPassword(employee.getPassword()) + "," + to_string(employee.getSalary()) + "," +employee.getEmail();
         saveToFile("employees.txt", data);
+    }
+    
+    static void saveAdmin(const Admin& admin) {
+        string data = to_string(admin.getId()) + "," + admin.getName() + "," +  hashPassword(admin.getPassword()) + "," + admin.getPosition() + "," + admin.getEmail();
+        saveToFile("admins.txt", data);
     }
     
     static vector<Client> getClients() {
@@ -278,15 +390,24 @@ public:
                 }
                 parts.push_back(line); // Add the last part
                 
-                string email = parts.size() > 4 ? parts[4] : "";
-                
-                clients.emplace_back(
-                    stoi(parts[0]),        // id
-                    parts[1],              // name
-                    parts[2],              // password (no hashing)
-                    stod(parts[3]),        // balance
-                    email                  // email
-                );
+                // Parsing safeguards: verify field counts before conversion
+                if (parts.size() >= 4) {
+                    try {
+                        string email = parts.size() > 4 ? parts[4] : "";
+                        
+                        Client client(
+                            stoi(parts[0]),        // id
+                            parts[1],              // name
+                            parts[2],              // password (hashed)
+                            stod(parts[3]),        // balance
+                            email                  // email
+                        );
+                        client.loadTransactionHistory();
+                        clients.push_back(client);
+                    } catch (const exception& e) {
+                        Logger::logError("Error parsing client data: " + line + " - " + e.what());
+                    }
+                }
             }
             file.close();
         }
@@ -308,15 +429,22 @@ public:
                 }
                 parts.push_back(line); 
 
-                string email = parts.size() > 4 ? parts[4] : "";
-                
-                employees.emplace_back(
-                    stoi(parts[0]),        // id
-                    parts[1],              // name
-                    parts[2],              // password (no hashing)
-                    stod(parts[3]),        // salary
-                    email                  // email
-                );
+                // Parsing safeguards: verify field counts before conversion
+                if (parts.size() >= 4) {
+                    try {
+                        string email = parts.size() > 4 ? parts[4] : "";
+                        
+                        employees.emplace_back(
+                            stoi(parts[0]),        // id
+                            parts[1],              // name
+                            parts[2],              // password (hashed)
+                            stod(parts[3]),        // salary
+                            email                  // email
+                        );
+                    } catch (const exception& e) {
+                        Logger::logError("Error parsing employee data: " + line + " - " + e.what());
+                    }
+                }
             }
             file.close();
         }
@@ -338,16 +466,23 @@ public:
                 }
                 parts.push_back(line);
 
-                string position = parts.size() > 3 ? parts[3] : "OWNER";
-                string email = parts.size() > 4 ? parts[4] : "";
-                
-                admins.emplace_back(
-                    stoi(parts[0]),        // id
-                    parts[1],              // name
-                    parts[2],              // password (no hashing)
-                    position,              // position
-                    email                  // email
-                );
+                // Parsing safeguards: verify field counts before conversion
+                if (parts.size() >= 3) {
+                    try {
+                        string position = parts.size() > 3 ? parts[3] : "OWNER";
+                        string email = parts.size() > 4 ? parts[4] : "";
+                        
+                        admins.emplace_back(
+                            stoi(parts[0]),        // id
+                            parts[1],              // name
+                            parts[2],              // password (hashed)
+                            position,              // position
+                            email                  // email
+                        );
+                    } catch (const exception& e) {
+                        Logger::logError("Error parsing admin data: " + line + " - " + e.what());
+                    }
+                }
             }
             file.close();
         }
@@ -400,8 +535,7 @@ public:
         if (!isEmployeeIdUnique(employee.getId())) {
             throw invalid_argument("Employee ID already exists.");
         }
-        string data = to_string(employee.getId()) + "," + employee.getName() + "," +  employee.getPassword() + "," + to_string(employee.getSalary()) + "," +employee.getEmail();
-        FileHelper::saveToFile("employees.txt", data);
+        FileHelper::saveEmployee(employee);
         Logger::logActivity("Added new employee", employee.getId(), "System");
     }
     
@@ -409,8 +543,7 @@ public:
         if (!isAdminIdUnique(admin.getId())) {
             throw invalid_argument("Admin ID already exists.");
         }
-        string data = to_string(admin.getId()) + "," + admin.getName() + "," +  admin.getPassword() + "," +  admin.getPosition() + "," +admin.getEmail();
-        FileHelper::saveToFile("admins.txt", data);
+        FileHelper::saveAdmin(admin);
         Logger::logActivity("Added new admin", admin.getId(), "System");
     }
 };
@@ -436,7 +569,9 @@ public:
         while (attempts < MAX_LOGIN_ATTEMPTS) {
             vector<Client> clients = FileHelper::getClients();
             for (const Client& client : clients) {
-                if (client.getId() == id && client.getPassword() == password) {
+                // Backward compatibility: check both raw password and hashed password
+                if (client.getId() == id && 
+                    (client.getPassword() == password || client.getPassword() == hashPassword(password))) {
                     Logger::logActivity("Logged in successfully", id, "Client");
                     cout << "\nWelcome, " << client.getName() << "!\n";
                     return client;
@@ -446,8 +581,9 @@ public:
             attempts++;
             if (attempts < MAX_LOGIN_ATTEMPTS) {
                 cout << "Invalid ID or password. You have " << (MAX_LOGIN_ATTEMPTS - attempts) << " attempts remaining.\n";
-                cout << "Enter Password: ";
-                cin >> password;
+                // Allow re-entering both ID and password
+                id = getValidIntInput("Enter Client ID: ");
+                password = getSafeLineInput("Enter Password: ");
             }
         }
         
@@ -580,62 +716,63 @@ public:
     }
     
     static Client updatePersonalInfo(Client client) {
-        cout << "\n--- Update Personal Information ---\n";
-        cout << "1. Update Name\n";
-        cout << "2. Update Password\n";
-        cout << "3. Update Email\n";
-        cout << "4. Return to Main Menu\n";
-        cout << "Choose an option: ";
-        
-        int choice = getValidIntInput("");
-        
-        switch (choice) {
-            case 1: {
-                string newName = getValidName("Enter new name: ");
-                client.setName(newName);
-                cout << "Name updated successfully.\n";
-                Logger::logActivity("Updated name", client.getId(), "Client");
-                break;
-            }
-            case 2: {
-                string newPassword = getValidPassword("Enter new password: ");
-                client.setPassword(newPassword);
-                cout << "Password updated successfully.\n";
-                Logger::logActivity("Updated password", client.getId(), "Client");
-                break;
-            }
-            case 3: {
-                string newEmail;
-                while (true) {
-                    cout << "Enter new email: ";
-                    cin >> newEmail;
-                    if (Validation::isValidEmail(newEmail)) {
-                        client.setEmail(newEmail);
-                        cout << "Email updated successfully.\n";
-                        Logger::logActivity("Updated email", client.getId(), "Client");
-                        break;
-                    } else {
-                        cout << "Invalid email format. Please try again.\n";
-                    }
+        while (true) {
+            cout << "\n--- Update Personal Information ---\n";
+            cout << "1. Update Name\n";
+            cout << "2. Update Password\n";
+            cout << "3. Update Email\n";
+            cout << "4. Return to Main Menu\n";
+            cout << "Choose an option: ";
+            
+            int choice = getValidIntInput("");
+            
+            switch (choice) {
+                case 1: {
+                    string newName = getValidName("Enter new name: ");
+                    client.setName(newName);
+                    cout << "Name updated successfully.\n";
+                    Logger::logActivity("Updated name", client.getId(), "Client");
+                    break;
                 }
-                break;
+                case 2: {
+                    string newPassword = getValidPassword("Enter new password: ");
+                    client.setPassword(newPassword);
+                    cout << "Password updated successfully.\n";
+                    Logger::logActivity("Updated password", client.getId(), "Client");
+                    break;
+                }
+                case 3: {
+                    string newEmail;
+                    while (true) {
+                        newEmail = getSafeLineInput("Enter new email: ");
+                        if (Validation::isValidEmail(newEmail)) {
+                            client.setEmail(newEmail);
+                            cout << "Email updated successfully.\n";
+                            Logger::logActivity("Updated email", client.getId(), "Client");
+                            break;
+                        } else {
+                            cout << "Invalid email format. Please try again.\n";
+                        }
+                    }
+                    break;
+                }
+                case 4: {
+                    // Save changes before returning
+                    vector<Client> clients = FileHelper::getClients();
+                    FileHelper::clearFile("clients.txt");
+                    for (const Client& c : clients) {
+                        if (c.getId() == client.getId()) {
+                            FileHelper::saveClient(client);
+                        } else {
+                            FileHelper::saveClient(c);
+                        }
+                    }
+                    return client;
+                }
+                default:
+                    cout << "Invalid option. Please try again.\n";
             }
-            case 4:
-                return client;
-            default:
-                cout << "Invalid option. Please try again.\n";
         }
-        vector<Client> clients = FileHelper::getClients();
-        FileHelper::clearFile("clients.txt");
-        for (const Client& c : clients) {
-            if (c.getId() == client.getId()) {
-                FileHelper::saveClient(client);
-            } else {
-                FileHelper::saveClient(c);
-            }
-        }
-        
-        return client;
     }
     
     static bool clientOptions(Client client) {
@@ -694,7 +831,9 @@ public:
         while (attempts < MAX_LOGIN_ATTEMPTS) {
             vector<Employee> employees = FileHelper::getEmployees();
             for (const Employee& employee : employees) {
-                if (employee.getId() == id && employee.getPassword() == password) {
+                // Backward compatibility: check both raw password and hashed password
+                if (employee.getId() == id && 
+                    (employee.getPassword() == password || employee.getPassword() == hashPassword(password))) {
                     Logger::logActivity("Logged in successfully", id, "Employee");
                     cout << "\nWelcome, " << employee.getName() << "!\n";
                     return employee;
@@ -704,8 +843,9 @@ public:
             attempts++;
             if (attempts < MAX_LOGIN_ATTEMPTS) {
                 cout << "Invalid ID or password. You have " << (MAX_LOGIN_ATTEMPTS - attempts) << " attempts remaining.\n";
-                cout << "Enter Password: ";
-                cin >> password;
+                // Allow re-entering both ID and password
+                id = getValidIntInput("Enter Employee ID: ");
+                password = getSafeLineInput("Enter Password: ");
             }
         }
         
@@ -727,8 +867,7 @@ public:
             double balance = getValidDoubleInput("Enter Initial Balance: $", MIN_CLIENT_BALANCE);
             
             string email;
-            cout << "Enter Client Email (optional, press Enter to skip): ";
-            getline(cin, email);
+            email = getSafeLineInput("Enter Client Email (optional, press Enter to skip): ");
             if (!email.empty() && !Validation::isValidEmail(email)) {
                 cout << "Invalid email format. Email will not be saved.\n";
                 email = "";
@@ -792,58 +931,58 @@ public:
                 cout << "Current client information:\n";
                 client.display();
                 
-                cout << "\n--- Edit Client Information ---\n";
-                cout << "1. Edit Name\n";
-                cout << "2. Edit Password\n";
-                cout << "3. Edit Balance\n";
-                cout << "4. Edit Email\n";
-                cout << "5. Return to Employee Menu\n";
-                cout << "Choose an option: ";
-                
-                int choice = getValidIntInput("");
-                
-                switch (choice) {
-                    case 1: {
-                        string newName = getValidName("Enter new name: ");
-                        client.setName(newName);
-                        cout << "Name updated successfully.\n";
-                        break;
-                    }
-                    case 2: {
-                        string newPassword = getValidPassword("Enter new password: ");
-                        client.setPassword(newPassword);
-                        cout << "Password updated successfully.\n";
-                        break;
-                    }
-                    case 3: {
-                        double newBalance = getValidDoubleInput("Enter new balance: $", MIN_CLIENT_BALANCE);
-                        client.setBalance(newBalance);
-                        cout << "Balance updated successfully.\n";
-                        break;
-                    }
-                    case 4: {
-                        string newEmail;
-                        while (true) {
-                            cout << "Enter new email: ";
-                            cin >> newEmail;
-                            if (Validation::isValidEmail(newEmail)) {
-                                client.setEmail(newEmail);
-                                cout << "Email updated successfully.\n";
-                                break;
-                            } else {
-                                cout << "Invalid email format. Please try again.\n";
-                            }
+                while (true) {
+                    cout << "\n--- Edit Client Information ---\n";
+                    cout << "1. Edit Name\n";
+                    cout << "2. Edit Password\n";
+                    cout << "3. Edit Balance\n";
+                    cout << "4. Edit Email\n";
+                    cout << "5. Return to Employee Menu\n";
+                    cout << "Choose an option: ";
+                    
+                    int choice = getValidIntInput("");
+                    
+                    switch (choice) {
+                        case 1: {
+                            string newName = getValidName("Enter new name: ");
+                            client.setName(newName);
+                            cout << "Name updated successfully.\n";
+                            break;
                         }
-                        break;
+                        case 2: {
+                            string newPassword = getValidPassword("Enter new password: ");
+                            client.setPassword(newPassword);
+                            cout << "Password updated successfully.\n";
+                            break;
+                        }
+                        case 3: {
+                            double newBalance = getValidDoubleInput("Enter new balance: $", MIN_CLIENT_BALANCE);
+                            client.setBalance(newBalance);
+                            cout << "Balance updated successfully.\n";
+                            break;
+                        }
+                        case 4: {
+                            string newEmail;
+                            while (true) {
+                                newEmail = getSafeLineInput("Enter new email: ");
+                                if (Validation::isValidEmail(newEmail)) {
+                                    client.setEmail(newEmail);
+                                    cout << "Email updated successfully.\n";
+                                    break;
+                                } else {
+                                    cout << "Invalid email format. Please try again.\n";
+                                }
+                            }
+                            break;
+                        }
+                        case 5:
+                            found = true;
+                            goto save_and_exit;
+                        default:
+                            cout << "Invalid option. Please try again.\n";
                     }
-                    case 5:
-                        return;
-                    default:
-                        cout << "Invalid option. Please try again.\n";
-                        return;
                 }
-                
-                found = true;
+                save_and_exit:
                 break;
             }
         }
@@ -1006,7 +1145,9 @@ public:
         while (attempts < MAX_LOGIN_ATTEMPTS) {
             vector<Admin> admins = FileHelper::getAdmins();
             for (const Admin& admin : admins) {
-                if (admin.getId() == id && admin.getPassword() == password) {
+                // Backward compatibility: check both raw password and hashed password
+                if (admin.getId() == id && 
+                    (admin.getPassword() == password || admin.getPassword() == hashPassword(password))) {
                     Logger::logActivity("Logged in successfully", id, "Admin");
                     cout << "\nWelcome, " << admin.getName() << " (" << admin.getPosition() << ")!\n";
                     return admin;
@@ -1016,10 +1157,11 @@ public:
             attempts++;
             if (attempts < MAX_LOGIN_ATTEMPTS) {
                 cout << "Invalid ID or password. You have " << (MAX_LOGIN_ATTEMPTS - attempts) << " attempts remaining.\n";
-                cout << "Enter Password: ";
-                cin >> password;
+                // Allow re-entering both ID and password
+                id = getValidIntInput("Enter Admin ID: ");
+                password = getSafeLineInput("Enter Password: ");
             }
-                    }
+        }
 
         Logger::logError("Failed login attempt for admin ID: " + to_string(id));
         cout << "Maximum login attempts reached. Please try again later.\n";
@@ -1039,8 +1181,7 @@ public:
             double salary = getValidDoubleInput("Enter Employee Salary: $", MIN_EMPLOYEE_SALARY);
             
             string email;
-            cout << "Enter Employee Email (optional, press Enter to skip): ";
-            getline(cin, email);
+            email = getSafeLineInput("Enter Employee Email (optional, press Enter to skip): ");
             if (!email.empty() && !Validation::isValidEmail(email)) {
                 cout << "Invalid email format. Email will not be saved.\n";
                 email = "";
@@ -1104,58 +1245,58 @@ public:
                 cout << "Current employee information:\n";
                 employee.display();
                 
-                cout << "\n--- Edit Employee Information ---\n";
-                cout << "1. Edit Name\n";
-                cout << "2. Edit Password\n";
-                cout << "3. Edit Salary\n";
-                cout << "4. Edit Email\n";
-                cout << "5. Return to Admin Menu\n";
-                cout << "Choose an option: ";
-                
-                int choice = getValidIntInput("");
-                
-                switch (choice) {
-                    case 1: {
-                        string newName = getValidName("Enter new name: ");
-                        employee.setName(newName);
-                        cout << "Name updated successfully.\n";
-                        break;
-                    }
-                    case 2: {
-                        string newPassword = getValidPassword("Enter new password: ");
-                        employee.setPassword(newPassword);
-                        cout << "Password updated successfully.\n";
-                        break;
-                    }
-                    case 3: {
-                        double newSalary = getValidDoubleInput("Enter new salary: $", MIN_EMPLOYEE_SALARY);
-                        employee.setSalary(newSalary);
-                        cout << "Salary updated successfully.\n";
-                        break;
-                    }
-                    case 4: {
-                        string newEmail;
-                        while (true) {
-                            cout << "Enter new email: ";
-                            cin >> newEmail;
-                            if (Validation::isValidEmail(newEmail)) {
-                                employee.setEmail(newEmail);
-                                cout << "Email updated successfully.\n";
-                                break;
-                            } else {
-                                cout << "Invalid email format. Please try again.\n";
-                            }
+                while (true) {
+                    cout << "\n--- Edit Employee Information ---\n";
+                    cout << "1. Edit Name\n";
+                    cout << "2. Edit Password\n";
+                    cout << "3. Edit Salary\n";
+                    cout << "4. Edit Email\n";
+                    cout << "5. Return to Admin Menu\n";
+                    cout << "Choose an option: ";
+                    
+                    int choice = getValidIntInput("");
+                    
+                    switch (choice) {
+                        case 1: {
+                            string newName = getValidName("Enter new name: ");
+                            employee.setName(newName);
+                            cout << "Name updated successfully.\n";
+                            break;
                         }
-                        break;
+                        case 2: {
+                            string newPassword = getValidPassword("Enter new password: ");
+                            employee.setPassword(newPassword);
+                            cout << "Password updated successfully.\n";
+                            break;
+                        }
+                        case 3: {
+                            double newSalary = getValidDoubleInput("Enter new salary: $", MIN_EMPLOYEE_SALARY);
+                            employee.setSalary(newSalary);
+                            cout << "Salary updated successfully.\n";
+                            break;
+                        }
+                        case 4: {
+                            string newEmail;
+                            while (true) {
+                                newEmail = getSafeLineInput("Enter new email: ");
+                                if (Validation::isValidEmail(newEmail)) {
+                                    employee.setEmail(newEmail);
+                                    cout << "Email updated successfully.\n";
+                                    break;
+                                } else {
+                                    cout << "Invalid email format. Please try again.\n";
+                                }
+                            }
+                            break;
+                        }
+                        case 5:
+                            found = true;
+                            goto save_and_exit_emp;
+                        default:
+                            cout << "Invalid option. Please try again.\n";
                     }
-                    case 5:
-                        return;
-                    default:
-                        cout << "Invalid option. Please try again.\n";
-                        return;
                 }
-                
-                found = true;
+                save_and_exit_emp:
                 break;
             }
         }
@@ -1182,8 +1323,7 @@ public:
             string position = getValidName("Enter Admin Position: ");
             
             string email;
-            cout << "Enter Admin Email (optional, press Enter to skip): ";
-            getline(cin, email);
+            email = getSafeLineInput("Enter Admin Email (optional, press Enter to skip): ");
             if (!email.empty() && !Validation::isValidEmail(email)) {
                 cout << "Invalid email format. Email will not be saved.\n";
                 email = "";
@@ -1222,33 +1362,37 @@ public:
     }
 
     static void systemSettings() {
-        cout << "\n--- System Settings ---\n";
-        cout << "1. Change Minimum Client Balance\n";
-        cout << "2. Change Minimum Employee Salary\n";
-        cout << "3. Return to Admin Menu\n";
-        cout << "Choose an option: ";
-        
-        int choice = getValidIntInput("");
-        
-        switch (choice) {
-            case 1: {
-                double newMinBalance = getValidDoubleInput("Enter new minimum client balance: $", 0.0);
-                // Update the constant (this would typically be done in a config file)
-                // For demonstration, we will just print the new value
-                cout << "Minimum client balance updated to: $" << newMinBalance << endl;
-                break;
+        while (true) {
+            cout << "\n--- System Settings ---\n";
+            cout << "1. Change Minimum Client Balance (Current: $" << MIN_CLIENT_BALANCE << ")\n";
+            cout << "2. Change Minimum Employee Salary (Current: $" << MIN_EMPLOYEE_SALARY << ")\n";
+            cout << "3. Return to Admin Menu\n";
+            cout << "Choose an option: ";
+            
+            int choice = getValidIntInput("");
+            
+            switch (choice) {
+                case 1: {
+                    double newMinBalance = getValidDoubleInput("Enter new minimum client balance: $", 0.0);
+                    MIN_CLIENT_BALANCE = newMinBalance;
+                    saveConfig();
+                    cout << "Minimum client balance updated to: $" << newMinBalance << endl;
+                    Logger::logActivity("Updated minimum client balance to $" + to_string(newMinBalance), 0, "Admin");
+                    break;
+                }
+                case 2: {
+                    double newMinSalary = getValidDoubleInput("Enter new minimum employee salary: $", 0.0);
+                    MIN_EMPLOYEE_SALARY = newMinSalary;
+                    saveConfig();
+                    cout << "Minimum employee salary updated to: $" << newMinSalary << endl;
+                    Logger::logActivity("Updated minimum employee salary to $" + to_string(newMinSalary), 0, "Admin");
+                    break;
+                }
+                case 3:
+                    return;
+                default:
+                    cout << "Invalid option. Please try again.\n";
             }
-            case 2: {
-                double newMinSalary = getValidDoubleInput("Enter new minimum employee salary: $", 0.0);
-                // Update the constant (this would typically be done in a config file)
-                // For demonstration, we will just print the new value
-                cout << "Minimum employee salary updated to: $" << newMinSalary << endl;
-                break;
-            }
-            case 3:
-                return;
-            default:
-                cout << "Invalid option. Please try again.\n";
         }
     }
 
@@ -1292,13 +1436,13 @@ public:
     }
 };
 
-// Function to get valid integer input
+// Function to get valid integer input (enforces positive integers)
 int getValidIntInput(const string& prompt) {
     int value;
     while (true) {
         cout << prompt;
         cin >> value;
-        if (cin.fail() || value < 0) {
+        if (cin.fail() || value <= 0) {
             cin.clear(); // clear the error flag
             cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard invalid input
             cout << "Invalid input. Please enter a positive integer.\n";
@@ -1345,8 +1489,7 @@ string getValidName(const string& prompt) {
 string getValidPassword(const string& prompt) {
     string password;
     while (true) {
-        cout << prompt;
-        cin >> password;
+        password = getSafeLineInput(prompt);
         try {
             Validation::validatePassword(password);
             return password;
@@ -1417,6 +1560,9 @@ public:
 
     // Method to run the application
    static void runApp() {
+    // Load configuration at startup
+    loadConfig();
+    
     bankName();
     welcome();
     while (true) {
@@ -1425,9 +1571,7 @@ public:
         switch (choice) {
             case 1: {
                 int clientId = getValidIntInput("Enter Client ID: ");
-                string password;
-                cout << "Enter Password: ";
-                cin >> password;
+                string password = getSafeLineInput("Enter Password: ");
                 Client client = ClientManager::login(clientId, password);
                 if (client.getId() != 0) {
                     ClientManager::clientOptions(client);
@@ -1436,9 +1580,7 @@ public:
             }
             case 2: {
                 int employeeId = getValidIntInput("Enter Employee ID: ");
-                string password;
-                cout << "Enter Password: ";
-                cin >> password;
+                string password = getSafeLineInput("Enter Password: ");
                 Employee employee = EmployeeManager::login(employeeId, password);
                 if (employee.getId() != 0) {
                     EmployeeManager::employeeOptions(employee);
@@ -1447,9 +1589,7 @@ public:
             }
             case 3: {
                 int adminId = getValidIntInput("Enter Admin ID: ");
-                string password;
-                cout << "Enter Password: ";
-                cin >> password;
+                string password = getSafeLineInput("Enter Password: ");
                 Admin admin = AdminManager::login(adminId, password);
                 if (admin.getId() != 0) {
                     AdminManager::adminOptions(admin);
