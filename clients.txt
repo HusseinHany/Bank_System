@@ -1,1 +1,2 @@
-1,John Doe,password123,2100.000000,john@example.com
+1,John Doe,password123,1899.000000,john@example.com
+2,Jane Doe,password456,3100.000000,jane@example.com

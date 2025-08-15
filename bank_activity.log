@@ -7,3 +7,26 @@
 [2025-08-15 16:40:19] Client (ID: 1) Logged in successfully
 [2025-08-15 16:40:19] Client (ID: 1) Viewed transaction history
 [2025-08-15 16:40:19] Client (ID: 1) Logged out
+[2025-08-15 16:41:08] Admin (ID: 1) Logged in successfully
+[2025-08-15 16:41:20] Admin (ID: 1) Logged in successfully
+[2025-08-15 16:41:20] SYSTEM: Minimum client balance changed from $1500.000000 to $2500.000000
+[2025-08-15 16:41:31] Client (ID: 1) Logged in successfully
+[2025-08-15 16:41:31] Client (ID: 1) Withdrew $100.000000. New balance: $2000.000000
+[2025-08-15 16:41:31] Client (ID: 1) Logged out
+[2025-08-15 16:41:54] Client (ID: 1) Logged in successfully
+[2025-08-15 16:41:54] Client (ID: 1) Withdrew $1.000000. New balance: $1999.000000
+[2025-08-15 16:41:54] Client (ID: 1) Logged out
+[2025-08-15 16:42:52] Client (ID: 1) Logged in successfully
+[2025-08-15 16:42:52] Client (ID: 1) Logged out
+[2025-08-15 16:43:05] Admin (ID: 1) Logged in successfully
+[2025-08-15 16:43:05] SYSTEM: Minimum client balance changed from $1500.000000 to $2500.000000
+[2025-08-15 16:43:43] Client (ID: 1) Logged in successfully
+[2025-08-15 16:43:43] Client (ID: 1) Withdrew $100.000000. New balance: $1899.000000
+[2025-08-15 16:43:43] Client (ID: 2) Deposited $100.000000. New balance: $3100.000000
+[2025-08-15 16:43:43] System (ID: 1) Updated client
+[2025-08-15 16:43:43] System (ID: 2) Updated client
+[2025-08-15 16:43:43] Client (ID: 1) Transferred $100.000000 to client ID: 2
+[2025-08-15 16:43:43] Client (ID: 1) Logged out
+[2025-08-15 16:44:05] Client (ID: 2) Logged in successfully
+[2025-08-15 16:44:05] Client (ID: 2) Viewed transaction history
+[2025-08-15 16:44:05] Client (ID: 2) Logged out
