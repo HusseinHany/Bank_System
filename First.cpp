@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <limits>
+#include <climits>
 #include <fstream>
 #include <chrono>
 #include <thread>
@@ -11,7 +12,16 @@
 #include <functional>
 #include <regex>
 #include <memory>
+#include <sstream>
+
+// Optional secure password input (Windows only)
+#ifndef USE_SECURE_PASSWORD
+#define USE_SECURE_PASSWORD 0
+#endif
+
+#if USE_SECURE_PASSWORD && defined(_WIN32)
 #include <conio.h>
+#endif
 
 using namespace std;
 
@@ -25,12 +35,14 @@ class FileHelper;
 class Validation;
 class Logger;
 class Screens;
+class TransactionStore;
 
 // Function prototypes
 int getValidIntInput(const string& prompt);
 double getValidDoubleInput(const string& prompt, double min);
 string getValidName(const string& prompt);
 string getValidPassword(const string& prompt);
+#if USE_SECURE_PASSWORD && defined(_WIN32)
 string getSecurePassword(const string& prompt) {
     cout << prompt;
     string password;
@@ -49,10 +61,19 @@ string getSecurePassword(const string& prompt) {
     cout << endl;
     return password;
 }
+#else
+string getSecurePassword(const string& prompt) {
+    // Fallback to regular input on non-Windows platforms
+    cout << prompt;
+    string password;
+    getline(cin, password);
+    return password;
+}
+#endif
 
-// Constants
-const double MIN_CLIENT_BALANCE = 1500.0;
-const double MIN_EMPLOYEE_SALARY = 5000.0;
+// Runtime configurable settings (replacing hardcoded constants)
+double MIN_CLIENT_BALANCE = 1500.0;
+double MIN_EMPLOYEE_SALARY = 5000.0;
 const int MAX_LOGIN_ATTEMPTS = 10;
 
 class Logger {
@@ -61,8 +82,7 @@ private:
         ofstream logFile("bank_activity.log", ios::app);
         time_t now = time(nullptr);
         char timestamp[26];
-        ctime_s(timestamp, sizeof(timestamp), &now);
-        timestamp[24] = '\0'; 
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
         
         if (logFile.is_open()) {
             logFile << "[" << timestamp << "] " << message << endl;
@@ -82,6 +102,66 @@ public:
     
     static void logSystemMessage(const string& message) {
         logToFile("SYSTEM: " + message);
+    }
+};
+
+// Utility functions
+string readLineTrimmed() {
+    string line;
+    if (getline(cin, line)) {
+        // Trim whitespace
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        return line;
+    }
+    return ""; // Return empty string if EOF or error
+}
+
+// TransactionStore class for persistent transaction history
+class TransactionStore {
+public:
+    static void saveTransaction(int clientId, const string& details) {
+        ofstream file("transactions.txt", ios::app);
+        if (file.is_open()) {
+            time_t now = time(nullptr);
+            char timestamp[26];
+            strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
+            
+            file << clientId << "|" << timestamp << "|" << details << endl;
+            file.close();
+        } else {
+            Logger::logError("Unable to open transactions.txt for writing");
+        }
+    }
+    
+    static vector<string> getTransactionHistory(int clientId) {
+        vector<string> history;
+        ifstream file("transactions.txt");
+        if (file.is_open()) {
+            string line;
+            while (getline(file, line)) {
+                size_t firstPipe = line.find('|');
+                if (firstPipe != string::npos) {
+                    string idStr = line.substr(0, firstPipe);
+                    try {
+                        int id = stoi(idStr);
+                        if (id == clientId) {
+                            size_t secondPipe = line.find('|', firstPipe + 1);
+                            if (secondPipe != string::npos) {
+                                string timestamp = line.substr(firstPipe + 1, secondPipe - firstPipe - 1);
+                                string details = line.substr(secondPipe + 1);
+                                history.push_back("[" + timestamp + "] " + details);
+                            }
+                        }
+                    } catch (const exception& e) {
+                        Logger::logError("Malformed transaction line: " + line);
+                        continue;
+                    }
+                }
+            }
+            file.close();
+        }
+        return history;
     }
 };
 
@@ -168,7 +248,7 @@ public:
     }
     
     bool withdraw(double amount) {
-        if (amount > balance) {
+        if (amount > balance || (balance - amount) < MIN_CLIENT_BALANCE) {
             return false;
         }
         balance -= amount;
@@ -177,19 +257,16 @@ public:
     }
     
     void recordTransaction(const string& details) {
-        time_t now = time(nullptr);
-        char timestamp[26];
-        ctime_s(timestamp, sizeof(timestamp), &now);
-        timestamp[24] = '\0';
+        // Record to persistent storage
+        TransactionStore::saveTransaction(id, details);
         
-        string transaction = "[" + string(timestamp) + "] " + details;
-        transactions.push_back(transaction);
-       
+        // Also log the activity
         Logger::logActivity(details, id, "Client");
     }
     
     vector<string> getTransactionHistory() const {
-        return transactions;
+        // Load transaction history from persistent storage
+        return TransactionStore::getTransactionHistory(id);
     }
     
     void display() const override {
@@ -263,30 +340,55 @@ public:
         saveToFile("employees.txt", data);
     }
     
+    static vector<Client> parseCSVLine(const string& line, vector<string>& parts) {
+        parts.clear();
+        stringstream ss(line);
+        string item;
+        
+        while (getline(ss, item, ',')) {
+            // Trim whitespace
+            item.erase(0, item.find_first_not_of(" \t\r\n"));
+            item.erase(item.find_last_not_of(" \t\r\n") + 1);
+            parts.push_back(item);
+        }
+        return {};
+    }
+    
     static vector<Client> getClients() {
         vector<Client> clients;
         ifstream file("clients.txt");
         if (file.is_open()) {
             string line;
+            int lineNumber = 0;
             while (getline(file, line)) {
+                lineNumber++;
+                if (line.empty()) continue;
+                
                 vector<string> parts;
-                size_t pos = 0;
-                string delimiter = ",";
-                while ((pos = line.find(delimiter)) != string::npos) {
-                    parts.push_back(line.substr(0, pos));
-                    line.erase(0, pos + delimiter.length());
+                parseCSVLine(line, parts);
+                
+                if (parts.size() < 4) {
+                    Logger::logError("Malformed client line " + to_string(lineNumber) + ": " + line);
+                    continue;
                 }
-                parts.push_back(line); // Add the last part
                 
-                string email = parts.size() > 4 ? parts[4] : "";
-                
-                clients.emplace_back(
-                    stoi(parts[0]),        // id
-                    parts[1],              // name
-                    parts[2],              // password (no hashing)
-                    stod(parts[3]),        // balance
-                    email                  // email
-                );
+                try {
+                    string email = parts.size() > 4 ? parts[4] : "";
+                    
+                    // Guard against overflow
+                    int id = stoi(parts[0]);
+                    double balance = stod(parts[3]);
+                    
+                    if (id < 0 || balance < 0) {
+                        Logger::logError("Invalid negative values in line " + to_string(lineNumber) + ": " + line);
+                        continue;
+                    }
+                    
+                    clients.emplace_back(id, parts[1], parts[2], balance, email);
+                } catch (const exception& e) {
+                    Logger::logError("Error parsing client line " + to_string(lineNumber) + ": " + line + " - " + e.what());
+                    continue;
+                }
             }
             file.close();
         }
@@ -298,25 +400,35 @@ public:
         ifstream file("employees.txt");
         if (file.is_open()) {
             string line;
+            int lineNumber = 0;
             while (getline(file, line)) {
-                vector<string> parts;
-                size_t pos = 0;
-                string delimiter = ",";
-                while ((pos = line.find(delimiter)) != string::npos) {
-                    parts.push_back(line.substr(0, pos));
-                    line.erase(0, pos + delimiter.length());
-                }
-                parts.push_back(line); 
-
-                string email = parts.size() > 4 ? parts[4] : "";
+                lineNumber++;
+                if (line.empty()) continue;
                 
-                employees.emplace_back(
-                    stoi(parts[0]),        // id
-                    parts[1],              // name
-                    parts[2],              // password (no hashing)
-                    stod(parts[3]),        // salary
-                    email                  // email
-                );
+                vector<string> parts;
+                parseCSVLine(line, parts);
+                
+                if (parts.size() < 4) {
+                    Logger::logError("Malformed employee line " + to_string(lineNumber) + ": " + line);
+                    continue;
+                }
+                
+                try {
+                    string email = parts.size() > 4 ? parts[4] : "";
+                    
+                    int id = stoi(parts[0]);
+                    double salary = stod(parts[3]);
+                    
+                    if (id < 0 || salary < 0) {
+                        Logger::logError("Invalid negative values in employee line " + to_string(lineNumber) + ": " + line);
+                        continue;
+                    }
+                    
+                    employees.emplace_back(id, parts[1], parts[2], salary, email);
+                } catch (const exception& e) {
+                    Logger::logError("Error parsing employee line " + to_string(lineNumber) + ": " + line + " - " + e.what());
+                    continue;
+                }
             }
             file.close();
         }
@@ -328,26 +440,34 @@ public:
         ifstream file("admins.txt");
         if (file.is_open()) {
             string line;
+            int lineNumber = 0;
             while (getline(file, line)) {
-                vector<string> parts;
-                size_t pos = 0;
-                string delimiter = ",";
-                while ((pos = line.find(delimiter)) != string::npos) {
-                    parts.push_back(line.substr(0, pos));
-                    line.erase(0, pos + delimiter.length());
-                }
-                parts.push_back(line);
-
-                string position = parts.size() > 3 ? parts[3] : "OWNER";
-                string email = parts.size() > 4 ? parts[4] : "";
+                lineNumber++;
+                if (line.empty()) continue;
                 
-                admins.emplace_back(
-                    stoi(parts[0]),        // id
-                    parts[1],              // name
-                    parts[2],              // password (no hashing)
-                    position,              // position
-                    email                  // email
-                );
+                vector<string> parts;
+                parseCSVLine(line, parts);
+                
+                if (parts.size() < 3) {
+                    Logger::logError("Malformed admin line " + to_string(lineNumber) + ": " + line);
+                    continue;
+                }
+                
+                try {
+                    string position = parts.size() > 3 ? parts[3] : "OWNER";
+                    string email = parts.size() > 4 ? parts[4] : "";
+                    
+                    int id = stoi(parts[0]);
+                    if (id < 0) {
+                        Logger::logError("Invalid negative ID in admin line " + to_string(lineNumber) + ": " + line);
+                        continue;
+                    }
+                    
+                    admins.emplace_back(id, parts[1], parts[2], position, email);
+                } catch (const exception& e) {
+                    Logger::logError("Error parsing admin line " + to_string(lineNumber) + ": " + line + " - " + e.what());
+                    continue;
+                }
             }
             file.close();
         }
@@ -412,6 +532,53 @@ public:
         string data = to_string(admin.getId()) + "," + admin.getName() + "," +  admin.getPassword() + "," +  admin.getPosition() + "," +admin.getEmail();
         FileHelper::saveToFile("admins.txt", data);
         Logger::logActivity("Added new admin", admin.getId(), "System");
+    }
+    
+    // Centralized update methods to eliminate repeated clear/append cycles
+    void updateClient(const Client& updatedClient) {
+        vector<Client> clients = FileHelper::getClients();
+        bool found = false;
+        
+        for (Client& client : clients) {
+            if (client.getId() == updatedClient.getId()) {
+                client = updatedClient;
+                found = true;
+                break;
+            }
+        }
+        
+        if (found) {
+            FileHelper::clearFile("clients.txt");
+            for (const Client& client : clients) {
+                FileHelper::saveClient(client);
+            }
+            Logger::logActivity("Updated client", updatedClient.getId(), "System");
+        } else {
+            Logger::logError("Attempted to update non-existent client ID: " + to_string(updatedClient.getId()));
+        }
+    }
+    
+    void updateEmployee(const Employee& updatedEmployee) {
+        vector<Employee> employees = FileHelper::getEmployees();
+        bool found = false;
+        
+        for (Employee& employee : employees) {
+            if (employee.getId() == updatedEmployee.getId()) {
+                employee = updatedEmployee;
+                found = true;
+                break;
+            }
+        }
+        
+        if (found) {
+            FileHelper::clearFile("employees.txt");
+            for (const Employee& employee : employees) {
+                FileHelper::saveEmployee(employee);
+            }
+            Logger::logActivity("Updated employee", updatedEmployee.getId(), "System");
+        } else {
+            Logger::logError("Attempted to update non-existent employee ID: " + to_string(updatedEmployee.getId()));
+        }
     }
 };
 
@@ -543,16 +710,17 @@ public:
         if (sender.withdraw(amount)) {
             recipient->deposit(amount);
             
-            FileHelper::clearFile("clients.txt");
-            for (const Client& client : clients) {
-                if (client.getId() == sender.getId()) {
-                    FileHelper::saveClient(sender);
-                } else if (client.getId() == recipientId) {
-                    FileHelper::saveClient(*recipient);
-                } else {
-                    FileHelper::saveClient(client);
-                }
-            }
+            // Record transfer transactions for both parties
+            string senderDetails = "Transferred $" + to_string(amount) + " to " + recipient->getName() + " (ID: " + to_string(recipientId) + ")";
+            string recipientDetails = "Received $" + to_string(amount) + " from " + sender.getName() + " (ID: " + to_string(sender.getId()) + ")";
+            
+            TransactionStore::saveTransaction(sender.getId(), senderDetails);
+            TransactionStore::saveTransaction(recipientId, recipientDetails);
+            
+            // Use centralized update methods
+            FileManager fileManager;
+            fileManager.updateClient(sender);
+            fileManager.updateClient(*recipient);
             
             cout << "Transfer successful. New balance: $" << fixed << setprecision(2) << sender.getBalance() << endl;
             Logger::logActivity("Transferred $" + to_string(amount) + " to client ID: " + to_string(recipientId), 
@@ -1223,6 +1391,9 @@ public:
 
     static void systemSettings() {
         cout << "\n--- System Settings ---\n";
+        cout << "Current Settings:\n";
+        cout << "  Minimum Client Balance: $" << fixed << setprecision(2) << MIN_CLIENT_BALANCE << "\n";
+        cout << "  Minimum Employee Salary: $" << fixed << setprecision(2) << MIN_EMPLOYEE_SALARY << "\n\n";
         cout << "1. Change Minimum Client Balance\n";
         cout << "2. Change Minimum Employee Salary\n";
         cout << "3. Return to Admin Menu\n";
@@ -1233,16 +1404,18 @@ public:
         switch (choice) {
             case 1: {
                 double newMinBalance = getValidDoubleInput("Enter new minimum client balance: $", 0.0);
-                // Update the constant (this would typically be done in a config file)
-                // For demonstration, we will just print the new value
-                cout << "Minimum client balance updated to: $" << newMinBalance << endl;
+                double oldBalance = MIN_CLIENT_BALANCE;
+                MIN_CLIENT_BALANCE = newMinBalance;
+                cout << "Minimum client balance updated from $" << oldBalance << " to $" << newMinBalance << endl;
+                Logger::logSystemMessage("Minimum client balance changed from $" + to_string(oldBalance) + " to $" + to_string(newMinBalance));
                 break;
             }
             case 2: {
                 double newMinSalary = getValidDoubleInput("Enter new minimum employee salary: $", 0.0);
-                // Update the constant (this would typically be done in a config file)
-                // For demonstration, we will just print the new value
-                cout << "Minimum employee salary updated to: $" << newMinSalary << endl;
+                double oldSalary = MIN_EMPLOYEE_SALARY;
+                MIN_EMPLOYEE_SALARY = newMinSalary;
+                cout << "Minimum employee salary updated from $" << oldSalary << " to $" << newMinSalary << endl;
+                Logger::logSystemMessage("Minimum employee salary changed from $" + to_string(oldSalary) + " to $" + to_string(newMinSalary));
                 break;
             }
             case 3:
@@ -1292,36 +1465,76 @@ public:
     }
 };
 
-// Function to get valid integer input
+// Function to get valid integer input with overflow protection
 int getValidIntInput(const string& prompt) {
-    int value;
     while (true) {
         cout << prompt;
-        cin >> value;
-        if (cin.fail() || value < 0) {
-            cin.clear(); // clear the error flag
-            cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard invalid input
+        string input = readLineTrimmed();
+        
+        // Handle EOF or empty input
+        if (cin.eof()) {
+            cout << "\nEnd of input detected. Exiting...\n";
+            exit(0);
+        }
+        
+        if (input.empty()) {
             cout << "Invalid input. Please enter a positive integer.\n";
-        } else {
-            cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard the rest of the line
-            return value;
+            continue;
+        }
+        
+        try {
+            // Check for extremely large inputs to prevent overflow
+            if (input.length() > 9) { // int max is ~2 billion, 10 digits
+                cout << "Number too large. Please enter a smaller positive integer.\n";
+                continue;
+            }
+            
+            long long temp = stoll(input);
+            if (temp < 0 || temp > INT_MAX) {
+                cout << "Invalid input. Please enter a positive integer within valid range.\n";
+                continue;
+            }
+            
+            return static_cast<int>(temp);
+        } catch (const exception& e) {
+            cout << "Invalid input. Please enter a positive integer.\n";
         }
     }
 }
 
-// Function to get valid double input
+// Function to get valid double input with overflow protection
 double getValidDoubleInput(const string& prompt, double min) {
-    double value;
     while (true) {
         cout << prompt;
-        cin >> value;
-        if (cin.fail() || value < min) {
-            cin.clear(); // clear the error flag
-            cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard invalid input
+        string input = readLineTrimmed();
+        
+        // Handle EOF or empty input
+        if (cin.eof()) {
+            cout << "\nEnd of input detected. Exiting...\n";
+            exit(0);
+        }
+        
+        if (input.empty()) {
             cout << "Invalid input. Please enter a number greater than or equal to " << min << ".\n";
-        } else {
-            cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard the rest of the line
+            continue;
+        }
+        
+        try {
+            // Check for extremely large inputs
+            if (input.length() > 20) {
+                cout << "Number too large. Please enter a smaller number.\n";
+                continue;
+            }
+            
+            double value = stod(input);
+            if (value < min) {
+                cout << "Invalid input. Please enter a number greater than or equal to " << min << ".\n";
+                continue;
+            }
+            
             return value;
+        } catch (const exception& e) {
+            cout << "Invalid input. Please enter a valid number greater than or equal to " << min << ".\n";
         }
     }
 }
@@ -1346,7 +1559,7 @@ string getValidPassword(const string& prompt) {
     string password;
     while (true) {
         cout << prompt;
-        cin >> password;
+        password = readLineTrimmed();
         try {
             Validation::validatePassword(password);
             return password;
@@ -1468,6 +1681,16 @@ public:
 
 
 int main() {
-    Screens::runApp();
+    try {
+        Screens::runApp();
+    } catch (const exception& e) {
+        Logger::logError("Unhandled exception in main: " + string(e.what()));
+        cout << "An unexpected error occurred. Please check the log file for details.\n";
+        return 1;
+    } catch (...) {
+        Logger::logError("Unknown exception in main");
+        cout << "An unknown error occurred. Please check the log file for details.\n";
+        return 1;
+    }
     return 0;
 }
