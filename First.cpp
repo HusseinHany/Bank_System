@@ -92,12 +92,6 @@ string hashPassword(const string& password) {
 string getSafeLineInput(const string& prompt) {
     string input;
     cout << prompt;
-    
-    // Only clear buffer if there's something to clear
-    if (cin.peek() == '\n') {
-        cin.ignore();
-    }
-    
     getline(cin, input);
     return input;
 }
