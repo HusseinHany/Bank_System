@@ -1,6 +1,0 @@
-123|2024-09-13 15:00:00|Deposited $100.00. New balance: $2100.00
-invalid_line_no_pipes
-124|incomplete_line
-123|2024-09-13 15:01:00|Withdrew $50.00. New balance: $2050.00
-abc|invalid_timestamp|Should not break system
-123|2024-09-13 15:02:00|Valid transaction after invalid ones123|Sat Sep 13 15:03:52 2025|Deposited $50.000000. New balance: $2050.000000

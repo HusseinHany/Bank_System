@@ -15,3 +15,8 @@
 [Sat Sep 13 15:06:36 2025] ERROR: Error parsing transaction data: abc|invalid_timestamp|Should not break system - stoi
 [Sat Sep 13 15:07:31 2025] ERROR: Error parsing transaction data: abc|invalid_timestamp|Should not break system - stoi
 [Sat Sep 13 15:07:31 2025] ERROR: Error parsing transaction data: abc|invalid_timestamp|Should not break system - stoi
+[Sat Sep 13 15:12:51 2025] Client (ID: 123) Logged in successfully
+[Sat Sep 13 15:12:51 2025] Client (ID: 123) Logged out
+[Sat Sep 13 15:13:31 2025] Client (ID: 123) Logged in successfully
+[Sat Sep 13 15:13:31 2025] Client (ID: 123) Checked balance
+[Sat Sep 13 15:13:31 2025] Client (ID: 123) Logged out
