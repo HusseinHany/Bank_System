@@ -92,7 +92,12 @@ string hashPassword(const string& password) {
 string getSafeLineInput(const string& prompt) {
     string input;
     cout << prompt;
-    cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Clear any leftover input
+    
+    // Only clear buffer if there's something to clear
+    if (cin.peek() == '\n') {
+        cin.ignore();
+    }
+    
     getline(cin, input);
     return input;
 }
@@ -261,12 +266,21 @@ public:
         string transaction = "[" + timestamp + "] " + details;
         transactions.push_back(transaction);
         
-        // Persist transaction to file
-        lock_guard<mutex> lock(fileMutex);
-        ofstream transFile("transactions.txt", ios::app);
-        if (transFile.is_open()) {
-            transFile << id << "|" << timestamp << "|" << details << endl;
-            transFile.close();
+        // Persist transaction to file with exception safety
+        try {
+            lock_guard<mutex> lock(fileMutex);
+            ofstream transFile("transactions.txt", ios::app);
+            if (transFile.is_open()) {
+                transFile << id << "|" << timestamp << "|" << details << endl;
+                if (transFile.fail()) {
+                    Logger::logError("Failed to write transaction to file for client ID: " + to_string(id));
+                }
+                transFile.close();
+            } else {
+                Logger::logError("Unable to open transactions.txt for writing");
+            }
+        } catch (const exception& e) {
+            Logger::logError("Exception in recordTransaction: " + string(e.what()));
         }
        
         Logger::logActivity(details, id, "Client");
@@ -282,15 +296,20 @@ public:
         if (transFile.is_open()) {
             string line;
             while (getline(transFile, line)) {
-                size_t pos1 = line.find('|');
-                size_t pos2 = line.find('|', pos1 + 1);
-                if (pos1 != string::npos && pos2 != string::npos) {
-                    int clientId = stoi(line.substr(0, pos1));
-                    if (clientId == id) {
-                        string timestamp = line.substr(pos1 + 1, pos2 - pos1 - 1);
-                        string details = line.substr(pos2 + 1);
-                        transactions.push_back("[" + timestamp + "] " + details);
+                try {
+                    size_t pos1 = line.find('|');
+                    size_t pos2 = line.find('|', pos1 + 1);
+                    if (pos1 != string::npos && pos2 != string::npos) {
+                        int clientId = stoi(line.substr(0, pos1));
+                        if (clientId == id) {
+                            string timestamp = line.substr(pos1 + 1, pos2 - pos1 - 1);
+                            string details = line.substr(pos2 + 1);
+                            transactions.push_back("[" + timestamp + "] " + details);
+                        }
                     }
+                } catch (const exception& e) {
+                    Logger::logError("Error parsing transaction data: " + line + " - " + e.what());
+                    // Continue processing other transactions
                 }
             }
             transFile.close();
@@ -343,21 +362,37 @@ public:
 class FileHelper {
 public:
     static void saveToFile(const string& filename, const string& data) {
-        lock_guard<mutex> lock(fileMutex);
-        ofstream file(filename, ios::app);
-        if (file.is_open()) {
-            file << data << endl;
-            file.close();
-        } else {
-            Logger::logError("Unable to open file: " + filename);
-            throw runtime_error("Unable to open file: " + filename);
+        try {
+            lock_guard<mutex> lock(fileMutex);
+            ofstream file(filename, ios::app);
+            if (file.is_open()) {
+                file << data << endl;
+                if (file.fail()) {
+                    Logger::logError("Failed to write data to file: " + filename);
+                    throw runtime_error("Failed to write data to file: " + filename);
+                }
+                file.close();
+            } else {
+                Logger::logError("Unable to open file: " + filename);
+                throw runtime_error("Unable to open file: " + filename);
+            }
+        } catch (const exception& e) {
+            Logger::logError("Exception in saveToFile: " + string(e.what()));
+            throw; // Re-throw the exception
         }
     }
     
     static void clearFile(const string& filename) {
-        lock_guard<mutex> lock(fileMutex);
-        ofstream file(filename, ios::trunc);
-        file.close();
+        try {
+            lock_guard<mutex> lock(fileMutex);
+            ofstream file(filename, ios::trunc);
+            if (file.fail()) {
+                Logger::logError("Failed to clear file: " + filename);
+            }
+            file.close();
+        } catch (const exception& e) {
+            Logger::logError("Exception in clearFile: " + string(e.what()));
+        }
     }
     
     static void saveClient(const Client& client) {
