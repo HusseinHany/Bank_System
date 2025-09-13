@@ -32,6 +32,7 @@
 *.app
 banking_system
 test_build
+test_input
 
 # Data files
 *.txt
