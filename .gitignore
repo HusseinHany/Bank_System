@@ -30,3 +30,13 @@
 *.exe
 *.out
 *.app
+banking_system
+test_build
+
+# Data files
+*.txt
+!config.txt
+!README.md
+
+# Logs
+*.log

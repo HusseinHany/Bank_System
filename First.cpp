@@ -92,7 +92,13 @@ string hashPassword(const string& password) {
 string getSafeLineInput(const string& prompt) {
     string input;
     cout << prompt;
-    cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Clear any leftover input
+    
+    // Check for EOF (end of input stream)
+    if (cin.eof()) {
+        cout << "\nEnd of input reached. Exiting...\n";
+        exit(0);
+    }
+    
     getline(cin, input);
     return input;
 }
@@ -279,18 +285,26 @@ public:
     void loadTransactionHistory() {
         transactions.clear();
         ifstream transFile("transactions.txt");
-        if (transFile.is_open()) {
+        if (!transFile.is_open()) {
+            // Create empty file if it doesn't exist
+            ofstream createFile("transactions.txt");
+            createFile.close();
+        } else {
             string line;
             while (getline(transFile, line)) {
-                size_t pos1 = line.find('|');
-                size_t pos2 = line.find('|', pos1 + 1);
-                if (pos1 != string::npos && pos2 != string::npos) {
-                    int clientId = stoi(line.substr(0, pos1));
-                    if (clientId == id) {
-                        string timestamp = line.substr(pos1 + 1, pos2 - pos1 - 1);
-                        string details = line.substr(pos2 + 1);
-                        transactions.push_back("[" + timestamp + "] " + details);
+                try {
+                    size_t pos1 = line.find('|');
+                    size_t pos2 = line.find('|', pos1 + 1);
+                    if (pos1 != string::npos && pos2 != string::npos) {
+                        int clientId = stoi(line.substr(0, pos1));
+                        if (clientId == id) {
+                            string timestamp = line.substr(pos1 + 1, pos2 - pos1 - 1);
+                            string details = line.substr(pos2 + 1);
+                            transactions.push_back("[" + timestamp + "] " + details);
+                        }
                     }
+                } catch (const exception& e) {
+                    Logger::logError("Error parsing transaction data: " + line + " - " + e.what());
                 }
             }
             transFile.close();
@@ -378,7 +392,11 @@ public:
     static vector<Client> getClients() {
         vector<Client> clients;
         ifstream file("clients.txt");
-        if (file.is_open()) {
+        if (!file.is_open()) {
+            // Create empty file if it doesn't exist
+            ofstream createFile("clients.txt");
+            createFile.close();
+        } else {
             string line;
             while (getline(file, line)) {
                 vector<string> parts;
@@ -417,7 +435,11 @@ public:
     static vector<Employee> getEmployees() {
         vector<Employee> employees;
         ifstream file("employees.txt");
-        if (file.is_open()) {
+        if (!file.is_open()) {
+            // Create empty file if it doesn't exist
+            ofstream createFile("employees.txt");
+            createFile.close();
+        } else {
             string line;
             while (getline(file, line)) {
                 vector<string> parts;
@@ -454,7 +476,11 @@ public:
     static vector<Admin> getAdmins() {
         vector<Admin> admins;
         ifstream file("admins.txt");
-        if (file.is_open()) {
+        if (!file.is_open()) {
+            // Create empty file if it doesn't exist
+            ofstream createFile("admins.txt");
+            createFile.close();
+        } else {
             string line;
             while (getline(file, line)) {
                 vector<string> parts;
@@ -1442,6 +1468,13 @@ int getValidIntInput(const string& prompt) {
     while (true) {
         cout << prompt;
         cin >> value;
+        
+        // Check for EOF (end of input stream)
+        if (cin.eof()) {
+            cout << "\nEnd of input reached. Exiting...\n";
+            exit(0);
+        }
+        
         if (cin.fail() || value <= 0) {
             cin.clear(); // clear the error flag
             cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard invalid input
@@ -1459,6 +1492,13 @@ double getValidDoubleInput(const string& prompt, double min) {
     while (true) {
         cout << prompt;
         cin >> value;
+        
+        // Check for EOF (end of input stream)
+        if (cin.eof()) {
+            cout << "\nEnd of input reached. Exiting...\n";
+            exit(0);
+        }
+        
         if (cin.fail() || value < min) {
             cin.clear(); // clear the error flag
             cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard invalid input
