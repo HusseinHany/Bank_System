@@ -46,8 +46,8 @@ int _getch() {
 double MIN_CLIENT_BALANCE = 1500.0;
 double MIN_EMPLOYEE_SALARY = 5000.0;
 const int MAX_LOGIN_ATTEMPTS = 10;
-const size_t MIN_HASH_LENGTH = 8;
-const size_t MAX_HASH_LENGTH = 64;
+const size_t MIN_HASHED_PASSWORD_LENGTH = 8;
+const size_t MAX_HASHED_PASSWORD_LENGTH = 64;
 
 // Mutex for thread-safe file operations
 mutex fileMutex;
@@ -95,7 +95,7 @@ string hashPassword(const string& password) {
 }
 
 bool isLikelyHashedPassword(const string& password) {
-    if (password.length() < MIN_HASH_LENGTH || password.length() > MAX_HASH_LENGTH) {
+    if (password.length() < MIN_HASHED_PASSWORD_LENGTH || password.length() > MAX_HASHED_PASSWORD_LENGTH) {
         return false;
     }
     return all_of(password.begin(), password.end(), [](unsigned char c) {
@@ -431,7 +431,9 @@ public:
         existingClients.close();
         if (hasClientsFile && remove("clients.txt") != 0) {
             Logger::logError(string("Unable to remove clients.txt before rewrite: ") + strerror(errno));
-            remove(tmpFile.c_str());
+            if (remove(tmpFile.c_str()) != 0) {
+                Logger::logError(string("Unable to remove temp clients file after failure: ") + strerror(errno));
+            }
             return false;
         }
         if (rename(tmpFile.c_str(), "clients.txt") != 0) {
@@ -458,7 +460,9 @@ public:
         existingEmployees.close();
         if (hasEmployeesFile && remove("employees.txt") != 0) {
             Logger::logError(string("Unable to remove employees.txt before rewrite: ") + strerror(errno));
-            remove(tmpFile.c_str());
+            if (remove(tmpFile.c_str()) != 0) {
+                Logger::logError(string("Unable to remove temp employees file after failure: ") + strerror(errno));
+            }
             return false;
         }
         if (rename(tmpFile.c_str(), "employees.txt") != 0) {
