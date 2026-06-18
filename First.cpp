@@ -13,6 +13,10 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <cctype>
+#include <cstdio>
+#include <cerrno>
+#include <cstring>
 
 #ifdef _WIN32
 #include <conio.h>
@@ -42,6 +46,8 @@ int _getch() {
 double MIN_CLIENT_BALANCE = 1500.0;
 double MIN_EMPLOYEE_SALARY = 5000.0;
 const int MAX_LOGIN_ATTEMPTS = 10;
+const size_t MIN_HASHED_PASSWORD_LENGTH = 8;
+const size_t MAX_HASHED_PASSWORD_LENGTH = 64;
 
 // Mutex for thread-safe file operations
 mutex fileMutex;
@@ -88,11 +94,29 @@ string hashPassword(const string& password) {
     return ss.str();
 }
 
+bool isLikelyHashedPassword(const string& password) {
+    if (password.length() < MIN_HASHED_PASSWORD_LENGTH || password.length() > MAX_HASHED_PASSWORD_LENGTH) {
+        return false;
+    }
+    return all_of(password.begin(), password.end(), [](unsigned char c) {
+        return isxdigit(c);
+    });
+}
+
+string normalizePasswordForStorage(const string& password) {
+    return isLikelyHashedPassword(password) ? password : hashPassword(password);
+}
+
 // Safe line input utility to handle buffer issues
 string getSafeLineInput(const string& prompt) {
     string input;
     cout << prompt;
-    cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Clear any leftover input
+    if (cin.fail()) {
+        cin.clear();
+    }
+    if (cin.peek() == '\n') {
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
     getline(cin, input);
     return input;
 }
@@ -342,6 +366,24 @@ public:
 // FileHelper class
 class FileHelper {
 public:
+    static string formatClientData(const Client& client) {
+        return to_string(client.getId()) + "," + client.getName() + "," +
+               normalizePasswordForStorage(client.getPassword()) + "," +
+               to_string(client.getBalance()) + "," + client.getEmail();
+    }
+
+    static string formatEmployeeData(const Employee& employee) {
+        return to_string(employee.getId()) + "," + employee.getName() + "," +
+               normalizePasswordForStorage(employee.getPassword()) + "," +
+               to_string(employee.getSalary()) + "," + employee.getEmail();
+    }
+
+    static string formatAdminData(const Admin& admin) {
+        return to_string(admin.getId()) + "," + admin.getName() + "," +
+               normalizePasswordForStorage(admin.getPassword()) + "," +
+               admin.getPosition() + "," + admin.getEmail();
+    }
+
     static void saveToFile(const string& filename, const string& data) {
         lock_guard<mutex> lock(fileMutex);
         ofstream file(filename, ios::app);
@@ -361,18 +403,95 @@ public:
     }
     
     static void saveClient(const Client& client) {
-        string data = to_string(client.getId()) + "," +  client.getName() + "," +  hashPassword(client.getPassword()) + "," + to_string(client.getBalance()) + "," +client.getEmail();
-        saveToFile("clients.txt", data);
+        saveToFile("clients.txt", formatClientData(client));
     }
     
     static void saveEmployee(const Employee& employee) {
-        string data = to_string(employee.getId()) + "," + employee.getName() + "," +  hashPassword(employee.getPassword()) + "," + to_string(employee.getSalary()) + "," +employee.getEmail();
-        saveToFile("employees.txt", data);
+        saveToFile("employees.txt", formatEmployeeData(employee));
     }
     
     static void saveAdmin(const Admin& admin) {
-        string data = to_string(admin.getId()) + "," + admin.getName() + "," +  hashPassword(admin.getPassword()) + "," + admin.getPosition() + "," + admin.getEmail();
-        saveToFile("admins.txt", data);
+        saveToFile("admins.txt", formatAdminData(admin));
+    }
+
+    static bool rewriteClients(const vector<Client>& clients) {
+        lock_guard<mutex> lock(fileMutex);
+        const string tmpFile = "clients.txt.tmp";
+        ofstream file(tmpFile, ios::trunc);
+        if (!file.is_open()) {
+            Logger::logError("Unable to open temp file for clients rewrite");
+            return false;
+        }
+        for (const Client& client : clients) {
+            file << formatClientData(client) << endl;
+        }
+        file.close();
+        ifstream existingClients("clients.txt");
+        bool hasClientsFile = existingClients.good();
+        existingClients.close();
+        if (hasClientsFile && remove("clients.txt") != 0) {
+            Logger::logError(string("Unable to remove clients.txt before rewrite: ") + strerror(errno));
+            if (remove(tmpFile.c_str()) != 0) {
+                Logger::logError(string("Unable to remove temp clients file after failure: ") + strerror(errno));
+            }
+            return false;
+        }
+        if (rename(tmpFile.c_str(), "clients.txt") != 0) {
+            Logger::logError(string("Unable to rename temp clients file: ") + strerror(errno));
+            return false;
+        }
+        return true;
+    }
+
+    static bool rewriteEmployees(const vector<Employee>& employees) {
+        lock_guard<mutex> lock(fileMutex);
+        const string tmpFile = "employees.txt.tmp";
+        ofstream file(tmpFile, ios::trunc);
+        if (!file.is_open()) {
+            Logger::logError("Unable to open temp file for employees rewrite");
+            return false;
+        }
+        for (const Employee& employee : employees) {
+            file << formatEmployeeData(employee) << endl;
+        }
+        file.close();
+        ifstream existingEmployees("employees.txt");
+        bool hasEmployeesFile = existingEmployees.good();
+        existingEmployees.close();
+        if (hasEmployeesFile && remove("employees.txt") != 0) {
+            Logger::logError(string("Unable to remove employees.txt before rewrite: ") + strerror(errno));
+            if (remove(tmpFile.c_str()) != 0) {
+                Logger::logError(string("Unable to remove temp employees file after failure: ") + strerror(errno));
+            }
+            return false;
+        }
+        if (rename(tmpFile.c_str(), "employees.txt") != 0) {
+            Logger::logError(string("Unable to rename temp employees file: ") + strerror(errno));
+            return false;
+        }
+        return true;
+    }
+
+    static bool updateClientRecord(const Client& updatedClient) {
+        vector<Client> clients = getClients();
+        for (Client& client : clients) {
+            if (client.getId() == updatedClient.getId()) {
+                client = updatedClient;
+                return rewriteClients(clients);
+            }
+        }
+        return false;
+    }
+
+    static bool updateEmployeeRecord(const Employee& updatedEmployee) {
+        vector<Employee> employees = getEmployees();
+        for (Employee& employee : employees) {
+            if (employee.getId() == updatedEmployee.getId()) {
+                employee = updatedEmployee;
+                return rewriteEmployees(employees);
+            }
+        }
+        return false;
     }
     
     static vector<Client> getClients() {
@@ -603,15 +722,10 @@ public:
     static Client deposit(Client client) {
         double amount = getValidDoubleInput("Enter amount to deposit: $", 0.01);
         client.deposit(amount);
-        
-        vector<Client> clients = FileHelper::getClients();
-        FileHelper::clearFile("clients.txt");
-        for (const Client& c : clients) {
-            if (c.getId() == client.getId()) {
-                FileHelper::saveClient(client);
-            } else {
-                FileHelper::saveClient(c);
-            }
+        if (!FileHelper::updateClientRecord(client)) {
+            cout << "Error: Could not persist updated client record.\n";
+            Logger::logError("Failed to persist client deposit for ID: " + to_string(client.getId()));
+            return client;
         }
         
         cout << "Deposit successful. New balance: $" << fixed << setprecision(2) << client.getBalance() << endl;
@@ -628,14 +742,10 @@ public:
         }
         
         if (client.withdraw(amount)) {
-            vector<Client> clients = FileHelper::getClients();
-            FileHelper::clearFile("clients.txt");
-            for (const Client& c : clients) {
-                if (c.getId() == client.getId()) {
-                    FileHelper::saveClient(client);
-                } else {
-                    FileHelper::saveClient(c);
-                }
+            if (!FileHelper::updateClientRecord(client)) {
+                cout << "Error: Could not persist updated client record.\n";
+                Logger::logError("Failed to persist client withdrawal for ID: " + to_string(client.getId()));
+                return client;
             }
             
             cout << "Withdrawal successful. New balance: $" << fixed << setprecision(2) << client.getBalance() << endl;
@@ -678,16 +788,19 @@ public:
         
         if (sender.withdraw(amount)) {
             recipient->deposit(amount);
-            
-            FileHelper::clearFile("clients.txt");
-            for (const Client& client : clients) {
+
+            for (Client& client : clients) {
                 if (client.getId() == sender.getId()) {
-                    FileHelper::saveClient(sender);
+                    client = sender;
                 } else if (client.getId() == recipientId) {
-                    FileHelper::saveClient(*recipient);
-                } else {
-                    FileHelper::saveClient(client);
+                    client = *recipient;
                 }
+            }
+
+            if (!FileHelper::rewriteClients(clients)) {
+                cout << "Error: Could not persist transfer.\n";
+                Logger::logError("Failed to persist transfer from client ID: " + to_string(sender.getId()));
+                return sender;
             }
             
             cout << "Transfer successful. New balance: $" << fixed << setprecision(2) << sender.getBalance() << endl;
@@ -757,15 +870,9 @@ public:
                     break;
                 }
                 case 4: {
-                    // Save changes before returning
-                    vector<Client> clients = FileHelper::getClients();
-                    FileHelper::clearFile("clients.txt");
-                    for (const Client& c : clients) {
-                        if (c.getId() == client.getId()) {
-                            FileHelper::saveClient(client);
-                        } else {
-                            FileHelper::saveClient(c);
-                        }
+                    if (!FileHelper::updateClientRecord(client)) {
+                        cout << "Error: Could not persist profile changes.\n";
+                        Logger::logError("Failed to persist profile update for client ID: " + to_string(client.getId()));
                     }
                     return client;
                 }
@@ -988,9 +1095,10 @@ public:
         }
 
         if (found) {
-            FileHelper::clearFile("clients.txt");
-            for (const Client& client : clients) {
-                FileHelper::saveClient(client);
+            if (!FileHelper::rewriteClients(clients)) {
+                cout << "Error: Could not persist updated client information.\n";
+                Logger::logError("Failed to persist client edit for ID: " + to_string(clientId));
+                return;
             }
             cout << "Client updated successfully.\n";
             Logger::logActivity("Updated client with ID: " + to_string(clientId), 0, "Employee");
@@ -1056,9 +1164,10 @@ public:
                 return;
         }
         
-        FileHelper::clearFile("clients.txt");
-        for (const Client& client : clients) {
-            FileHelper::saveClient(client);
+        if (!FileHelper::rewriteClients(clients)) {
+            cout << "Error: Could not persist client transaction.\n";
+            Logger::logError("Failed to persist employee transaction for client ID: " + to_string(clientId));
+            return;
         }
         
         Logger::logActivity("Processed transaction for client ID: " + to_string(clientId), 0, "Employee");
@@ -1302,9 +1411,10 @@ public:
         }
 
         if (found) {
-            FileHelper::clearFile("employees.txt");
-            for (const Employee& employee : employees) {
-                FileHelper::saveEmployee(employee);
+            if (!FileHelper::rewriteEmployees(employees)) {
+                cout << "Error: Could not persist updated employee information.\n";
+                Logger::logError("Failed to persist employee edit for ID: " + to_string(employeeId));
+                return;
             }
             cout << "Employee updated successfully.\n";
             Logger::logActivity("Updated employee with ID: " + to_string(employeeId), 0, "Admin");
