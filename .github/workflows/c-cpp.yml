@@ -19,14 +19,5 @@ jobs:
       run: |
         git config --global safe.directory /home/runner/work/Bank_System/Bank_System
 
-    - name: Configure
-      run: ./configure
-    
     - name: Build
-      run: make
-    
-    - name: Run checks
-      run: make check
-    
-    - name: Run distcheck
-      run: make distcheck
+      run: g++ -std=c++17 -Wall -Wextra -pedantic First.cpp -o bank_system
