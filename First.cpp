@@ -15,6 +15,8 @@
 #include <sstream>
 #include <cctype>
 #include <cstdio>
+#include <cerrno>
+#include <cstring>
 
 #ifdef _WIN32
 #include <conio.h>
@@ -44,6 +46,8 @@ int _getch() {
 double MIN_CLIENT_BALANCE = 1500.0;
 double MIN_EMPLOYEE_SALARY = 5000.0;
 const int MAX_LOGIN_ATTEMPTS = 10;
+const size_t MIN_HASH_LENGTH = 8;
+const size_t MAX_HASH_LENGTH = 64;
 
 // Mutex for thread-safe file operations
 mutex fileMutex;
@@ -91,11 +95,11 @@ string hashPassword(const string& password) {
 }
 
 bool isLikelyHashedPassword(const string& password) {
-    if (password.length() < 8 || password.length() > 64) {
+    if (password.length() < MIN_HASH_LENGTH || password.length() > MAX_HASH_LENGTH) {
         return false;
     }
     return all_of(password.begin(), password.end(), [](unsigned char c) {
-        return isxdigit(c) != 0;
+        return isxdigit(c);
     });
 }
 
@@ -111,7 +115,7 @@ string getSafeLineInput(const string& prompt) {
         cin.clear();
     }
     if (cin.peek() == '\n') {
-        cin.ignore(1);
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
     }
     getline(cin, input);
     return input;
@@ -426,12 +430,12 @@ public:
         bool hasClientsFile = existingClients.good();
         existingClients.close();
         if (hasClientsFile && remove("clients.txt") != 0) {
-            Logger::logError("Unable to remove clients.txt before rewrite");
+            Logger::logError(string("Unable to remove clients.txt before rewrite: ") + strerror(errno));
             remove(tmpFile.c_str());
             return false;
         }
         if (rename(tmpFile.c_str(), "clients.txt") != 0) {
-            Logger::logError("Unable to rename temp clients file");
+            Logger::logError(string("Unable to rename temp clients file: ") + strerror(errno));
             return false;
         }
         return true;
@@ -453,12 +457,12 @@ public:
         bool hasEmployeesFile = existingEmployees.good();
         existingEmployees.close();
         if (hasEmployeesFile && remove("employees.txt") != 0) {
-            Logger::logError("Unable to remove employees.txt before rewrite");
+            Logger::logError(string("Unable to remove employees.txt before rewrite: ") + strerror(errno));
             remove(tmpFile.c_str());
             return false;
         }
         if (rename(tmpFile.c_str(), "employees.txt") != 0) {
-            Logger::logError("Unable to rename temp employees file");
+            Logger::logError(string("Unable to rename temp employees file: ") + strerror(errno));
             return false;
         }
         return true;
