@@ -77,6 +77,14 @@ Run the Executable
 
 ./bank_system
 
+First run
+
+The program has no sign-up screen, so the first admin is created by hand. In the folder you run it from, create a file named admins.txt with one line:
+
+1,Your Name,yourpassword,OWNER,you@example.com
+
+Log in as Admin with ID 1 and that password, then add employees; employees add clients. Passwords of accounts created inside the program are stored hashed.
+
 Follow the Prompts
 
 Enter details when prompted

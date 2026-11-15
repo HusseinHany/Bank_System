@@ -123,9 +123,9 @@ string getSafeLineInput(const string& prompt) {
     if (cin.fail()) {
         cin.clear();
     }
-    if (cin.peek() == '\n') {
-        cin.ignore(numeric_limits<streamsize>::max(), '\n');
-    }
+    // The numeric helpers already consume the rest of their line, so the next
+    // line is read as it is. Skipping a leading newline here used to swallow
+    // the Enter key on optional fields and take the following answer instead.
     getline(cin, input);
     quitIfInputClosed();
     return input;
@@ -1644,7 +1644,6 @@ public:
         cout << "2. Employee Login\n";
         cout << "3. Admin Login\n";
         cout << "4. Exit\n";
-        cout << "Choose an option: ";
     }
 
     // Method to get the user's choice for login type
