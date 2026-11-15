@@ -107,6 +107,15 @@ string normalizePasswordForStorage(const string& password) {
     return isLikelyHashedPassword(password) ? password : hashPassword(password);
 }
 
+// Leave cleanly when input is closed (Ctrl+D, or the end of a piped file)
+// instead of looping forever on a stream that can no longer be read.
+void quitIfInputClosed() {
+    if (cin.eof()) {
+        cout << "\nInput closed. Exiting.\n";
+        exit(0);
+    }
+}
+
 // Safe line input utility to handle buffer issues
 string getSafeLineInput(const string& prompt) {
     string input;
@@ -118,6 +127,7 @@ string getSafeLineInput(const string& prompt) {
         cin.ignore(numeric_limits<streamsize>::max(), '\n');
     }
     getline(cin, input);
+    quitIfInputClosed();
     return input;
 }
 
@@ -1553,6 +1563,7 @@ int getValidIntInput(const string& prompt) {
         cout << prompt;
         cin >> value;
         if (cin.fail() || value <= 0) {
+            quitIfInputClosed();
             cin.clear(); // clear the error flag
             cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard invalid input
             cout << "Invalid input. Please enter a positive integer.\n";
@@ -1570,6 +1581,7 @@ double getValidDoubleInput(const string& prompt, double min) {
         cout << prompt;
         cin >> value;
         if (cin.fail() || value < min) {
+            quitIfInputClosed();
             cin.clear(); // clear the error flag
             cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard invalid input
             cout << "Invalid input. Please enter a number greater than or equal to " << min << ".\n";
@@ -1586,6 +1598,7 @@ string getValidName(const string& prompt) {
     while (true) {
         cout << prompt;
         getline(cin, name);
+        quitIfInputClosed();
         try {
             Validation::validateName(name);
             return name;

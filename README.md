@@ -71,11 +71,11 @@ How to Use
 
 Compile the Program
 
-g++ banking_system.cpp -o banking_system
+g++ -std=c++17 First.cpp -o bank_system
 
 Run the Executable
 
-./banking_system
+./bank_system
 
 Follow the Prompts
 

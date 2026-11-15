@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+# Built programs
+bank_system
+bank_system_test
