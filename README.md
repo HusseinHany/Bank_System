@@ -33,7 +33,7 @@ classDiagram
         +getId() int
         +getName() string
         +setPassword(string)
-        +display()*
+        +display() virtual
     }
     class Client {
         -double balance
