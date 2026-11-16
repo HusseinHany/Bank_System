@@ -1,5 +1,9 @@
 # Bank System
 
+<p align="center">
+  <a href="https://husseinhany.github.io/#projects"><img src="docs/banner.svg" width="100%" alt="Bank System class hierarchy: Client, Employee and Admin inherit from Person, and a $300.00 transfer moves from client 100 to client 101."></a>
+</p>
+
 A console banking system in C++ with three kinds of users, each with their own menu: **admins** manage employees, **employees** manage clients, and **clients** manage their own money. Everything is saved to plain text files, passwords are stored hashed, and every action is logged.
 
 <p align="center">
