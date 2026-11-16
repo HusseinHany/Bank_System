@@ -85,6 +85,13 @@ string getCurrentTimestamp() {
     return timestamp;
 }
 
+// Formats an amount of money with two decimals, e.g. 1500 -> "1500.00"
+string money(double amount) {
+    stringstream ss;
+    ss << fixed << setprecision(2) << amount;
+    return ss.str();
+}
+
 // Password hashing function using std::hash with hex encoding
 string hashPassword(const string& password) {
     hash<string> hasher;
@@ -273,20 +280,22 @@ public:
     
     void setBalance(double newBalance) { 
         balance = newBalance; 
-        recordTransaction("Balance updated to $" + to_string(balance));
+        recordTransaction("Balance updated to $" + money(balance));
     }
     
-    void deposit(double amount) {
+    // verb and detail shape the history line, e.g.
+    // "Received $300.00 from client 100. New balance: $3300.00"
+    void deposit(double amount, const string& verb = "Deposited", const string& detail = "") {
         balance += amount;
-        recordTransaction("Deposited $" + to_string(amount) + ". New balance: $" + to_string(balance));
+        recordTransaction(verb + " $" + money(amount) + detail + ". New balance: $" + money(balance));
     }
     
-    bool withdraw(double amount) {
+    bool withdraw(double amount, const string& verb = "Withdrew", const string& detail = "") {
         if (amount > balance) {
             return false;
         }
         balance -= amount;
-        recordTransaction("Withdrew $" + to_string(amount) + ". New balance: $" + to_string(balance));
+        recordTransaction(verb + " $" + money(amount) + detail + ". New balance: $" + money(balance));
         return true;
     }
     
@@ -796,8 +805,8 @@ public:
             return sender;
         }
         
-        if (sender.withdraw(amount)) {
-            recipient->deposit(amount);
+        if (sender.withdraw(amount, "Transferred", " to client " + to_string(recipientId))) {
+            recipient->deposit(amount, "Received", " from client " + to_string(sender.getId()));
 
             for (Client& client : clients) {
                 if (client.getId() == sender.getId()) {
@@ -814,7 +823,7 @@ public:
             }
             
             cout << "Transfer successful. New balance: $" << fixed << setprecision(2) << sender.getBalance() << endl;
-            Logger::logActivity("Transferred $" + to_string(amount) + " to client ID: " + to_string(recipientId), 
+            Logger::logActivity("Transferred $" + money(amount) + " to client ID: " + to_string(recipientId), 
                                sender.getId(), "Client");
         } else {
             cout << "Insufficient funds.\n";

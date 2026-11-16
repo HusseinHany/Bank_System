@@ -1,113 +1,137 @@
-# Bank_System
-Banking System in C++
+# Bank System
 
-Overview
+A console banking system in C++ with three kinds of users, each with their own menu: **admins** manage employees, **employees** manage clients, and **clients** manage their own money. Everything is saved to plain text files, passwords are stored hashed, and every action is logged.
 
-This project is a simple banking system implemented in C++. It defines three types of users: Clients, Employees, and Admins. The system allows Clients to manage their balance, Employees to store salary details, and Admins to oversee the system. The program also supports file storage to save user data persistently.
+<p align="center">
+  <img src="docs/demo.svg" width="760" alt="Recording of the program: an admin adds an employee, the employee adds a client, and the client deposits, withdraws, transfers money and views the transaction history.">
+</p>
 
-Features
+<p align="center"><sub>Real output from the program. An admin adds an employee, the employee opens a client account, and the client deposits, withdraws, transfers and checks the history.</sub></p>
 
-Client Features:
+## Who can do what
 
-Set and retrieve personal details (ID, name, password, balance)
+| Role | Menu |
+| --- | --- |
+| **Admin** | Add, list, search and edit employees · add admins · change system settings (minimum client balance, minimum salary) · view the activity log |
+| **Employee** | Add, list, search and edit clients · process deposits and withdrawals for a client · view a client's transaction history |
+| **Client** | Check balance · deposit · withdraw · transfer to another client · view own transaction history · update name, password and email |
 
-Deposit and withdraw money
+Rules the program enforces: a client's balance can't drop below the minimum (default $1,500), an employee's salary can't be below the minimum (default $5,000), IDs are unique per role, names need at least 3 characters and passwords at least 6, and every login allows a limited number of attempts.
 
-Transfer funds to another client
+## Class hierarchy
 
-Display account details
+`Client`, `Employee` and `Admin` all inherit the shared identity fields from `Person`. Each role has a manager class that holds its menu and actions.
 
-Save and load client data from a file
+```mermaid
+classDiagram
+    direction TB
+    class Person {
+        #int id
+        #string name
+        #string password
+        #string email
+        +getId() int
+        +getName() string
+        +setPassword(string)
+        +display()*
+    }
+    class Client {
+        -double balance
+        -vector~string~ transactions
+        +deposit(amount)
+        +withdraw(amount) bool
+        +getTransactionHistory()
+        +display()
+    }
+    class Employee {
+        -double salary
+        +getSalary() double
+        +display()
+    }
+    class Admin {
+        -string position
+        +getPosition() string
+        +display()
+    }
+    Person <|-- Client
+    Person <|-- Employee
+    Person <|-- Admin
 
-Employee Features:
+    class ClientManager {
+        +login(id, password) Client
+        +deposit() withdraw() transfer()
+        +viewTransactionHistory()
+    }
+    class EmployeeManager {
+        +login(id, password) Employee
+        +addNewClient() editClientInfo()
+        +processClientTransactions()
+    }
+    class AdminManager {
+        +login(id, password) Admin
+        +addNewEmployee() addNewAdmin()
+        +systemSettings() viewSystemLogs()
+    }
+    ClientManager ..> Client : uses
+    EmployeeManager ..> Client : manages
+    EmployeeManager ..> Employee : uses
+    AdminManager ..> Employee : manages
+    AdminManager ..> Admin : uses
+```
 
-Set and retrieve personal details (ID, name, password, salary)
+## How the code is layered
 
-Display employee details
+```mermaid
+flowchart TB
+    S["Screens<br/>login menu and main loop"] --> CM["ClientManager"]
+    S --> EM["EmployeeManager"]
+    S --> AM["AdminManager"]
+    CM & EM & AM --> V["Validation<br/>names, passwords, IDs, amounts, email"]
+    CM & EM & AM --> FM["FileManager<br/>unique IDs, add records"]
+    FM --> FH["FileHelper<br/>read, write and rewrite the data files"]
+    CM & EM & AM --> L["Logger<br/>bank_activity.log"]
+    FH --> F[("clients.txt · employees.txt · admins.txt<br/>transactions.txt · config.txt")]
+```
 
-Save and load employee data from a file
+| Layer | Classes | Job |
+| --- | --- | --- |
+| Interface | `Screens` | Shows the login options and hands over to the right role |
+| Roles | `ClientManager`, `EmployeeManager`, `AdminManager` | One menu and set of actions per role |
+| Model | `Person`, `Client`, `Employee`, `Admin` | The data and the rules that belong to it, such as deposit and withdraw |
+| Services | `Validation`, `Logger`, `FileManager`, `FileHelper` | Input checks, the activity log, and file storage |
 
-Admin Features:
+## Data files
 
-Inherits all Employee functionalities
+All files are created in the folder the program runs from.
 
-Manage system-wide data
+| File | Contents |
+| --- | --- |
+| `admins.txt` | `id,name,passwordHash,position,email` |
+| `employees.txt` | `id,name,passwordHash,salary,email` |
+| `clients.txt` | `id,name,passwordHash,balance,email` |
+| `transactions.txt` | `clientId|timestamp|details`, e.g. `100|...|Transferred $300.00 to client 101. New balance: $5000.00` |
+| `bank_activity.log` | Every login, change and error, with a timestamp |
+| `config.txt` | `MIN_CLIENT_BALANCE` and `MIN_EMPLOYEE_SALARY` |
 
-File Handling
+Updates are written to a temporary file first and then swapped in, so a crash can't leave a half-written data file.
 
-The program uses file handling to store and retrieve user data:
+## Build and run
 
-Client.txt: Stores client details (ID, name, password, balance)
-
-Employee.txt: Stores employee details (ID, name, password, salary)
-
-Admin.txt: Stores admin details (ID, name, password, salary)
-
-Class Structure
-
-Person (Base Class)
-
-Contains common attributes: name, id, password
-
-Methods for setting and retrieving these attributes
-
-Client (Derived from Person)
-
-Additional attribute: balance
-
-Methods for deposit, withdrawal, and transfer
-
-Employee (Derived from Person)
-
-Additional attribute: salary
-
-Method to set and retrieve salary
-
-Admin (Derived from Employee)
-
-Inherits all functionalities of Employee
-
-How to Use
-
-Compile the Program
-
+```bash
 g++ -std=c++17 First.cpp -o bank_system
-
-Run the Executable
-
 ./bank_system
+```
 
-First run
+**First run:** the program has no sign-up screen, so create the first admin by hand. In the folder you run it from, create `admins.txt` with one line:
 
-The program has no sign-up screen, so the first admin is created by hand. In the folder you run it from, create a file named admins.txt with one line:
-
+```
 1,Your Name,yourpassword,OWNER,you@example.com
+```
 
-Log in as Admin with ID 1 and that password, then add employees; employees add clients. Passwords of accounts created inside the program are stored hashed.
+Log in as Admin with ID 1 and that password, add an employee, then log in as the employee to add clients. Accounts created inside the program store their passwords hashed.
 
-Follow the Prompts
+The GitHub Actions workflow builds the program with `-Wall -Wextra -pedantic` on every push.
 
-Enter details when prompted
+## Built with
 
-Perform deposit, withdrawal, or transfers
-
-View account details
-
-Possible Enhancements
-
-Implement a proper authentication system for login
-
-Add an interactive menu for user operations
-
-Improve file handling by using structured formats (e.g., JSON or database integration)
-
-Implement error handling for file operations
-
-Author
-
-This project was developed as part of a learning exercise in C++.
-
-License
-
-This project is open-source and can be modified for educational purposes.
-
+C++17 · object-oriented design (inheritance, encapsulation) · file I/O · GitHub Actions
