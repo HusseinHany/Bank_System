@@ -20,7 +20,7 @@ Rules the program enforces: a client's balance can't drop below the minimum (def
 
 ## Class hierarchy
 
-`Client`, `Employee` and `Admin` all inherit the shared identity fields from `Person`. Each role has a manager class that holds its menu and actions.
+`Client`, `Employee` and `Admin` all inherit the shared identity fields from `Person` and override `display()`. Each role's menu lives in its own manager class, shown in the next diagram.
 
 ```mermaid
 classDiagram
@@ -57,26 +57,6 @@ classDiagram
     Person <|-- Employee
     Person <|-- Admin
 
-    class ClientManager {
-        +login(id, password) Client
-        +deposit() withdraw() transfer()
-        +viewTransactionHistory()
-    }
-    class EmployeeManager {
-        +login(id, password) Employee
-        +addNewClient() editClientInfo()
-        +processClientTransactions()
-    }
-    class AdminManager {
-        +login(id, password) Admin
-        +addNewEmployee() addNewAdmin()
-        +systemSettings() viewSystemLogs()
-    }
-    ClientManager ..> Client : uses
-    EmployeeManager ..> Client : manages
-    EmployeeManager ..> Employee : uses
-    AdminManager ..> Employee : manages
-    AdminManager ..> Admin : uses
 ```
 
 ## How the code is layered
